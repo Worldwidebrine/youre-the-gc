@@ -12,8 +12,9 @@ const CANVAS_WIDTH = canvas.width = canvas.height = SLOT_EDGE_COUNT * SLOT_WIDTH
 const GARBAGE_COLOR = "grey";
 const ROOT_COLOR = "orange";
 const OBJECT_COLOR = "grey";
-const OBJECT_COUNT = 1 + Math.trunc(SLOT_EDGE_COUNT * SLOT_EDGE_COUNT / 5);
-const GARBAGE_COUNT = Math.trunc(OBJECT_COUNT * 2.5);
+const OBJECT_COUNT = 18 - 1;
+const garbageLengths = [7, 5, 6, 8, 1, 1, 1, 1];
+const GARBAGE_COUNT = garbageLengths.reduce((prev, cur) => (prev + cur), 0);
 
 const drawSlot = (type, x, y) => {
     if (type === 0) {
@@ -29,72 +30,98 @@ const drawSlot = (type, x, y) => {
 let /** @type {(FakeObject[][][])?} */ slots = null;
 
 const generateSlots = () => {
-    const rootedTree = [];
-    rootedTree.length = OBJECT_COUNT;
-    {
-        const LAST = OBJECT_COUNT - 1;
-        const root = {
+    const rootedObjects = [];
+    rootedObjects.length = OBJECT_COUNT;
+    const root = {
+        holders: new Set, holding: new Set,
+        x: 0, y: 0,
+        type: 0
+    };
+    let last = root;
+    for (let i = 0; i < OBJECT_COUNT; i++) {
+        const target = {
             holders: new Set, holding: new Set,
             x: 0, y: 0,
-            type: 0
+            type: 1
         };
-        rootedTree[LAST] = root;
-        for (let i = 0; i < LAST; i++) {
-            const target = {
+        rootedObjects[i] = target;
+        last.holding.add(target);
+        target.holders.add(last);
+        last = target
+    }
+    for (let i = 0; i < 16; i++) { // add random ref towards root
+        const holderIndex = Math.trunc(Math.random() * OBJECT_COUNT);
+        const target = (() => {
+            const index = Math.trunc(Math.random() * (holderIndex + 1));
+            if (index < holderIndex) {
+                return rootedObjects[index];
+            }
+            return root;
+        })(); // Rust let-else
+        const holder = rootedObjects[holderIndex];
+        target.holders.add(holder);
+        holder.holding.add(target)
+    }
+
+    const unrootedObjects = [];
+    for (let i = garbageLengths.length - 1; i > -1; i--) { // generate garbage
+        const GARBAGE_COUNT = garbageLengths[i];
+        const garbageStart = unrootedObjects.length;
+        const garbageEnd = garbageStart + GARBAGE_COUNT;
+        unrootedObjects.length = garbageEnd;
+        for (let i = garbageStart; i < garbageEnd; i++) {
+            unrootedObjects[i] = {
                 holders: new Set, holding: new Set,
                 x: 0, y: 0,
-                type: 1
-            };
-            rootedTree[i] = target;
-            const holder = (() => {
-                const index = Math.trunc(Math.random() * (i + 1));
-                if (index < i) {
-                    return rootedTree[index];
+                type: 2
+            }
+        }
+        let linkedLength = garbageStart + 1; // 0 is root of garbage
+        while (linkedLength < garbageEnd) { // add branch to garbage
+            const chainStart = linkedLength;
+            const chainLength = 1 + Math.trunc(Math.random() * (garbageEnd - chainStart - 1));
+            const chainEnd = chainStart + chainLength;
+            for (let i = chainStart + 1; i < chainEnd; i++) { // build chain 0 holding 1
+                const holder = unrootedObjects[i - 1];
+                const target = unrootedObjects[i];
+                target.holders.add(holder);
+                holder.holding.add(target);
+                if (Math.random() < 0.5) { // back
+                    holder.holders.add(target);
+                    target.holding.add(holder)
                 }
-                return root;
-            })();
-            holder.holding.add(target);
-            target.holders.add(holder)
+            }
+            const chainedLength = chainStart - garbageStart;
+            const chainHolder = garbageStart + Math.trunc(Math.random() * chainedLength);
+            const chainHoldBack = garbageStart + Math.trunc(Math.random() * chainedLength);
+            { // fork
+                const holder = unrootedObjects[chainHolder];
+                const target = unrootedObjects[chainStart];
+                target.holders.add(holder);
+                holder.holding.add(target)
+            }
+            { // merge
+                const holder = unrootedObjects[chainEnd - 1];
+                const target = unrootedObjects[chainHoldBack];
+                target.holders.add(holder);
+                holder.holding.add(target)
+            }
+            linkedLength = chainEnd
         }
     }
-    for (let i = Math.trunc(OBJECT_COUNT / 3); i > 0; i--) { // add random ref
-        const holderIndex = Math.trunc(Math.random() * OBJECT_COUNT);
-        const targetIndex = (() => {
-            const targetIndex = Math.trunc(Math.random() * (OBJECT_COUNT - 1));
-            if (targetIndex < holderIndex) {
-                return targetIndex;
-            }
-            return targetIndex + 1;
-        })(); // Rust let-else
-        const { [targetIndex]: target, [holderIndex]: holder } = rootedTree;
-        target.holders.add(holder);
-        holder.holding.add(target)
+    const garbageCount = unrootedObjects.length;
+    if (GARBAGE_COUNT !== garbageCount) {
+        throw "garbage count mismatch";
     }
-    const unrootedObjects = [];
-    unrootedObjects.length = GARBAGE_COUNT;
-    for (let i = 0; i < GARBAGE_COUNT; i++) {
-        unrootedObjects[i] = {
-            holders: new Set, holding: new Set,
-            x: 0, y: 0,
-            type: 2
-        }
-    }
-    for (let i = GARBAGE_COUNT * 2; i > 0; i--) { // random ref
-        const holderIndex = Math.trunc(Math.random() * GARBAGE_COUNT);
-        const targetIndex = (() => {
-            const targetIndex = Math.trunc(Math.random() * (GARBAGE_COUNT - 1));
-            if (targetIndex < holderIndex) {
-                return targetIndex;
+    for (let i = 0; i < 45; i++) { // add random ref towards root
+        const target = (() => {
+            const index = Math.trunc(Math.random() * (OBJECT_COUNT + 1));
+            if (index < OBJECT_COUNT) {
+                return rootedObjects[index];
             }
-            return targetIndex + 1;
+            return root;
         })();
-        const { [targetIndex]: target, [holderIndex]: holder } = unrootedObjects;
-        target.holders.add(holder);
-        holder.holding.add(target)
-    }
-    for (let i = OBJECT_COUNT; i > 0; i--) { // add ref towards tree
-        const { [Math.trunc(Math.random() * GARBAGE_COUNT)]: holder } = unrootedObjects;
-        const { [Math.trunc(Math.random() * OBJECT_COUNT)]: target } = rootedTree;
+        const holder = unrootedObjects[Math.trunc(Math.random() * garbageCount)];
         target.holders.add(holder);
         holder.holding.add(target)
     }
@@ -109,20 +136,25 @@ const generateSlots = () => {
         }
         slots[i] = arr
     }
-    const TOTAL = OBJECT_COUNT + GARBAGE_COUNT;
-    const arr = [];
-    arr.length = TOTAL;
-    let garbageLeft = GARBAGE_COUNT;
-    let objectLeft = OBJECT_COUNT - 1;
+    const TOTAL = OBJECT_COUNT + garbageCount;
+    const arr = slots[0][0];
+    arr.length = TOTAL + 1;
+    let garbageLeft = garbageCount;
+    let objectLeft = OBJECT_COUNT;
     for (let i = 0; i < TOTAL; i++) {
         if ((Math.random() < OBJECT_COUNT / TOTAL || garbageLeft < 1) && objectLeft > 0) {
-            arr[i] = rootedTree[--objectLeft];
+            const index = Math.trunc(Math.random() * objectLeft);
+            arr[i] = rootedObjects[index];
+            objectLeft--;
+            rootedObjects[index] = rootedObjects[objectLeft];
             continue;
         }
-        arr[i] = unrootedObjects[--garbageLeft]
+        const index = Math.trunc(Math.random() * garbageLeft);
+        arr[i] = unrootedObjects[index];
+        garbageLeft--;
+        unrootedObjects[index] = unrootedObjects[garbageLeft]
     }
-    arr[TOTAL - 1] = rootedTree[OBJECT_COUNT - 1];
-    slots[0][0] = arr
+    arr[TOTAL] = root
 }
 let selectedX = null;
 let selectedY = null;
@@ -218,11 +250,12 @@ const freeSlot = () => {
         }
     }
     for (let i = length - 1; i > -1; i--) {
-        const element = slot[i];
-        for (const orph of element.holding) {
-            orph.holders.delete(element);
-            element.holding.delete(orph)
+        const orph = slot[i];
+        const { holding } = orph;
+        for (const { holders } of holding) {
+            holders.delete(orph)
         }
+        holding.clear()
     }
     slots[selectedX][selectedY] = [];
     console.log("freed objects");
