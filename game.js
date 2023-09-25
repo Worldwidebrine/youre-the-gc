@@ -64,8 +64,8 @@ const generateSlots = () => {
     }
 
     const unrootedObjects = [];
-    for (let i = garbageLengths.length - 1; i > -1; i--) { // generate garbage
-        const GARBAGE_COUNT = garbageLengths[i];
+    for (let id = garbageLengths.length - 1; id > -1; id--) { // generate garbage
+        const GARBAGE_COUNT = garbageLengths[id];
         const garbageStart = unrootedObjects.length;
         const garbageEnd = garbageStart + GARBAGE_COUNT;
         unrootedObjects.length = garbageEnd;
@@ -73,7 +73,7 @@ const generateSlots = () => {
             unrootedObjects[i] = {
                 holders: new Set, holding: new Set,
                 x: 0, y: 0,
-                type: 2
+                type: 2 + id
             }
         }
         let linkedLength = garbageStart + 1; // 0 is root of garbage
@@ -237,8 +237,13 @@ const freeSlot = () => {
     }
     const slot = slots[selectedX][selectedY];
     const { length } = slot;
-    if (slot[length - 1].type === 0) {
+    const top = slot[length - 1];
+    if (top.type < 1) {
         console.log("can not free root object");
+        return;
+    }
+    if (length !== garbageLengths[top.type - 2]) {
+        console.log("can not free unrelated object(s)");
         return;
     }
     for (let i = 0; i < length; i++) {
@@ -258,7 +263,7 @@ const freeSlot = () => {
         holding.clear()
     }
     slots[selectedX][selectedY] = [];
-    console.log("freed objects");
+    console.log("freed object(s)");
     freed += length;
     if (freed === GARBAGE_COUNT) {
         console.log("finished");
