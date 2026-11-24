@@ -1,34 +1,1322 @@
 <!DOCTYPE html>
+<!--
+  You're the GC — 单文件重构 / 优化 / 增强版
+  原作：https://github.com/Worldwidebrine/youre-the-gc  (© Worldwidebrine, Apache-2.0)
+  原作许可：https://raw.githubusercontent.com/Worldwidebrine/youre-the-gc/main/LICENSE
+  本文件在原作基础上做了重构与修改：内联全部代码、引擎/渲染/控制分层、修复混合堆误释放、
+  新增响应式 UI、HUD、撤销、扫描、提示、动画、音效、难度与评分等。
+-->
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>You're the GC</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            border: 0;
-        }
-
-        body {
-            height: 100vmin;
-            width: 100vmin;
-            overflow: hidden;
-            margin: 0px auto;
-        }
-
-        canvas {
-            height: 100%;
-            width: 100%;
-            background-color: black;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#070b14">
+<title>You're the GC</title>
+<style>
+:root{
+  --bg:#070b14; --card:#111a2b; --card2:#0d1524; --line:#22304a;
+  --fg:#e8eef9; --dim:#8ea0bd; --accent:#38e0b0; --accent2:#38bdf8;
+  --root:#fb923c; --danger:#fb7185; --warn:#facc15;
+  --radius:14px; --shadow:0 10px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:radial-gradient(1200px 700px at 50% -20%,#152341 0%,var(--bg) 60%) fixed;
+  color:var(--fg); min-height:100dvh;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased; -webkit-tap-highlight-color:transparent;
+}
+button{font:inherit;color:inherit;cursor:pointer;border:1px solid var(--line);background:#18243a;border-radius:10px;padding:9px 12px;transition:.15s ease;min-height:40px}
+button:hover:not(:disabled){border-color:var(--accent);background:#1d3049}
+button:active:not(:disabled){transform:translateY(1px)}
+button:disabled{opacity:.38;cursor:not-allowed}
+button.primary{background:linear-gradient(135deg,#1d9d7e,#127a68);border-color:#2ad3a5;color:#031a14;font-weight:700}
+button.primary:hover:not(:disabled){background:linear-gradient(135deg,#28c39c,#15907a)}
+button.ghost{background:transparent}
+.app{max-width:1120px;margin:0 auto;padding:14px 14px 28px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.logo{width:44px;height:44px;flex:0 0 44px;border-radius:12px;display:grid;place-items:center;font-weight:800;font-size:15px;letter-spacing:.5px;
+  background:linear-gradient(135deg,var(--root),#f43f5e);color:#1a0b04;box-shadow:0 6px 20px rgba(251,146,60,.28)}
+.brand h1{font-size:19px;line-height:1.15;margin:0;letter-spacing:.2px;white-space:nowrap}
+.brand p{margin:3px 0 0;font-size:12px;color:var(--dim)}
+.top-actions{display:flex;gap:8px}
+.icon-btn{width:40px;padding:0;font-size:17px;display:grid;place-items:center}
+.layout{display:grid;grid-template-columns:1fr;gap:14px}
+.board-wrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);min-width:0}
+.board-head,.board-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;letter-spacing:1.2px;color:var(--dim);text-transform:uppercase}
+.board-head span:last-child{color:var(--accent2);letter-spacing:.5px}
+.canvas-shell{position:relative;width:100%;max-width:660px;margin:10px auto;aspect-ratio:1/1;border-radius:10px;overflow:hidden;background:#05080f;border:1px solid #1b2942}
+canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
+canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--accent2)}
+.board-foot{min-height:34px;margin-top:8px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--fg);
+  background:var(--card2);border-radius:9px;padding:9px 11px;line-height:1.4}
+.board-foot.err{color:#ffd0d6;background:rgba(251,113,133,.12)}
+.board-foot.ok{color:#c6ffe9;background:rgba(56,224,176,.1)}
+.panel{display:flex;flex-direction:column;gap:12px;min-width:0}
+.box{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:13px;box-shadow:var(--shadow)}
+.box-title{font-size:11px;letter-spacing:1.4px;color:var(--dim);text-transform:uppercase;margin:0 0 10px}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{background:var(--card2);border:1px solid #1d2b44;border-radius:10px;padding:9px 6px;text-align:center}
+.stat b{display:block;font-size:17px;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat span{font-size:10px;color:var(--dim)}
+.progress-row{display:flex;align-items:center;gap:9px;margin-top:11px}
+.bar{flex:1;height:9px;border-radius:99px;background:#0a1220;overflow:hidden;border:1px solid #1d2b44}
+.bar>i{display:block;height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .35s ease}
+.progress-row small{color:var(--dim);font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{font-size:12px;padding:5px 10px;border-radius:99px;border:1px solid #2a3d5c;background:#152238;color:var(--fg);font-variant-numeric:tabular-nums}
+.chip.done{opacity:.42;text-decoration:line-through;border-color:#2b6a58;background:#10302a}
+.chip b{color:var(--accent);font-weight:700}
+.inspector{font-size:12.5px;line-height:1.75;color:var(--dim);min-height:62px}
+.inspector .k{color:var(--fg);font-weight:600}
+.inspector .tag{display:inline-block;padding:1px 7px;border-radius:6px;background:#1b2b45;color:var(--accent2);font-size:11px;margin-right:6px}
+.actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.difficulty{display:flex;gap:6px}
+.difficulty button{flex:1;padding:8px 4px;font-size:12px}
+.difficulty button.active{border-color:var(--accent);background:rgba(56,224,176,.14);color:var(--accent);font-weight:700}
+.legend{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:11.5px;color:var(--dim)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-2px}
+footer{margin-top:18px;text-align:center;font-size:11px;color:#5d6f8f;line-height:1.7}
+footer a{color:#7fa6d8;text-decoration:none}
+/* 弹窗 */
+.modal{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(3,7,15,.78);backdrop-filter:blur(6px)}
+.modal.show{display:flex}
+.modal-card{width:min(100%,520px);max-height:86dvh;overflow:auto;background:var(--card);border:1px solid #2b4066;border-radius:18px;padding:20px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.modal-card h2{margin:0 0 4px;font-size:21px}
+.modal-card .sub{color:var(--dim);font-size:12.5px;margin:0 0 16px}
+.modal-card h3{font-size:13px;color:var(--accent);margin:16px 0 7px;letter-spacing:.5px}
+.modal-card p,.modal-card li{font-size:13px;line-height:1.8;color:#cdd9ec;margin:5px 0}
+.modal-card ul{padding-left:20px;margin:6px 0}
+.modal-card kbd{background:#1b2b45;border:1px solid #33486b;border-radius:5px;padding:1px 6px;font-size:11px;font-family:inherit}
+.modal-actions{display:flex;gap:8px;margin-top:20px}
+.modal-actions button{flex:1}
+.win-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}
+.win-stats div{background:var(--card2);border:1px solid #1d2b44;border-radius:10px;padding:12px 6px;text-align:center}
+.win-stats b{display:block;font-size:20px;color:var(--accent)}
+.win-stats span{font-size:11px;color:var(--dim)}
+.stars{text-align:center;font-size:30px;letter-spacing:6px;color:var(--warn);margin:6px 0}
+/* toast */
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);z-index:60;opacity:0;pointer-events:none;
+  background:#1c2b45;border:1px solid #3a5b82;border-radius:99px;padding:10px 18px;font-size:13px;box-shadow:var(--shadow);transition:.25s ease;max-width:90vw;text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.bad{border-color:#a13a52;background:#3a1c29}
+@media (min-width:900px){
+  .layout{grid-template-columns:minmax(0,1fr) 330px;align-items:start}
+  .app{padding:22px 20px 28px}
+  .brand h1{font-size:22px}
+}
+@media (max-width:380px){ .stat b{font-size:15px} .actions{grid-template-columns:repeat(2,1fr)} }
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
 </head>
-
 <body>
-    <script type="module" src="./game.js"></script>
-</body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">GC</div>
+      <div>
+        <h1>You're the GC</h1>
+        <p><span id="brandLine">You're the GC</span></p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn ghost" id="btnSound" data-i18n-title="titleSound" data-i18n-aria="titleSound">♪</button>
+      <button class="icon-btn ghost" id="btnHelp" data-i18n-title="titleHelp" data-i18n-aria="ariaHelp">?</button>
+    </div>
+  </header>
 
+  <main class="layout">
+    <section class="board-wrap">
+      <div class="board-head"><span data-i18n="boardHead">内存网格</span><span id="boardMeta">9 × 9</span></div>
+      <div class="canvas-shell">
+        <canvas id="board" tabindex="0" data-i18n-aria="ariaBoard"></canvas>
+      </div>
+      <div class="board-foot" id="msg" data-i18n="msgInitial">点击左上角的对象堆开始整理内存。</div>
+    </section>
+
+    <aside class="panel">
+      <div class="box">
+        <p class="box-title" data-i18n="boxStatus">运行状态</p>
+        <div class="stat-grid">
+          <div class="stat"><b id="statFreed">0</b><span data-i18n="statFreed">已释放</span></div>
+          <div class="stat"><b id="statTotal">30</b><span data-i18n="statTotal">待释放</span></div>
+          <div class="stat"><b id="statMoves">0</b><span data-i18n="statMoves">步数</span></div>
+          <div class="stat"><b id="statTime">00:00</b><span data-i18n="statTime">用时</span></div>
+        </div>
+        <div class="progress-row"><div class="bar"><i id="barFill"></i></div><small id="barText">0%</small></div>
+      </div>
+
+      <div class="box">
+        <p class="box-title"><span data-i18n="boxGroups">待释放组</span> <span data-i18n="groupsSub" style="text-transform:none;letter-spacing:0">/ 组内对象数</span></p>
+        <div class="chips" id="groups"></div>
+      </div>
+
+      <div class="box">
+        <p class="box-title" data-i18n="boxInspector">对象检查器</p>
+        <div class="inspector" id="inspector" data-i18n-html="inspectorIdle">选中任意格子查看堆信息。<br>提示：白色箭头 = 引用方向。</div>
+      </div>
+
+      <div class="box">
+        <p class="box-title" data-i18n="boxActions">操作</p>
+        <div class="actions">
+          <button id="btnUndo" data-i18n="btnUndo">↶ 撤销</button>
+          <button id="btnScan" data-i18n="btnScan">◎ 扫描 Mark</button>
+          <button id="btnHint" data-i18n="btnHint">✦ 提示</button>
+          <button id="btnNew" data-i18n="btnNew">⟳ 新的一局</button>
+        </div>
+        <div class="difficulty" id="difficulty" style="margin-top:10px">
+          <button data-diff="easy" data-i18n="diffEasy">轻松</button>
+          <button data-diff="normal" class="active" data-i18n="diffNormal">普通</button>
+          <button data-diff="hard" data-i18n="diffHard">专家</button>
+        </div>
+      </div>
+
+      <div class="box">
+        <p class="box-title" data-i18n="boxLegend">图例</p>
+        <div class="legend">
+          <span><i style="background:#fb923c"></i><span data-i18n="legendRoot">ROOT 根对象</span></span>
+          <span><i style="background:#94a3b8"></i><span data-i18n="legendLive">普通对象</span></span>
+          <span><i style="background:#38e0b0"></i><span data-i18n="legendFree">可释放候选</span></span>
+          <span><i style="background:#fff;height:2px;border-radius:0"></i><span data-i18n="legendArrow">引用箭头</span></span>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <span data-i18n="footerPrefix">重构自 </span><a href="https://github.com/Worldwidebrine/youre-the-gc" target="_blank" rel="noopener">Worldwidebrine / youre-the-gc</a><span data-i18n="footerSuffix">（Apache-2.0）· 单文件离线可运行</span><br>
+    <span data-i18n="footerKeys">键盘：方向键 / Enter / Esc / Z / M / H / R</span>
+  </footer>
+</div>
+
+<div class="modal" id="helpModal" role="dialog" aria-modal="true" data-i18n-aria="ariaHelp">
+  <div class="modal-card">
+    <h2 data-i18n="helpTitle">你是垃圾回收器</h2>
+    <p class="sub" data-i18n="helpSub">You're the GC · 找出不可达对象，成组释放</p>
+    <h3 data-i18n="helpGoalH">目标</h3>
+    <p data-i18n-html="helpGoalP">所有对象一开始堆在左上角 <b>HEAP</b> 格。从 <b>ROOT</b>（橙色）出发能沿箭头到达的对象是存活对象，<b>不可释放</b>；其余都是垃圾。把全部垃圾释放即通关。</p>
+    <h3 data-i18n="helpRulesH">规则</h3>
+    <ul>
+      <li data-i18n-html="helpRule1">白色箭头表示引用：<b>持有者 → 被引用者</b>。同一格内的引用不画线，把对象搬到不同格子才能看清引用图。</li>
+      <li data-i18n-html="helpRule2">同一组的对象必须<b>全部堆在同一格</b>，且没有任何来自格子外部的引用，才能释放。</li>
+      <li data-i18n-html="helpRule3">各组的大小见右侧「待释放组」清单；混有不同组的堆无法释放。</li>
+    </ul>
+    <h3 data-i18n="helpOpsH">操作</h3>
+    <ul>
+      <li data-i18n-html="helpOp1">点非空格 <b>选中</b> → 再点<b>同一格</b>尝试释放；点<b>其它格</b>把堆顶对象搬过去。</li>
+      <li data-i18n-html="helpOp2">键盘：<kbd>方向键</kbd> 移动焦点，<kbd>Enter</kbd>/<kbd>Space</kbd> 确认，<kbd>Esc</kbd> 取消选择。</li>
+      <li data-i18n-html="helpOp3"><kbd>Z</kbd> 撤销 · <kbd>M</kbd> 扫描 · <kbd>H</kbd> 提示 · <kbd>R</kbd> 新局。</li>
+    </ul>
+    <h3 data-i18n="helpToolsH">辅助工具</h3>
+    <ul>
+      <li data-i18n-html="helpTool1"><b>扫描 Mark</b>：执行标记阶段，临时显示每格「可达对象数 / 总数」。</li>
+      <li data-i18n-html="helpTool2"><b>提示</b>：给出下一步搬运建议。扫描与提示都会计入提示次数，影响评星。</li>
+    </ul>
+    <div class="modal-actions"><button class="primary" id="btnHelpClose" data-i18n="btnStart">开始回收</button></div>
+  </div>
+</div>
+
+<div class="modal" id="winModal" role="dialog" aria-modal="true" data-i18n-aria="ariaWin">
+  <div class="modal-card" style="text-align:center">
+    <h2 data-i18n="winTitle">内存已清空 🎉</h2>
+    <p class="sub" data-i18n="winSub">所有不可达对象都已释放</p>
+    <div class="stars" id="winStars">★★★★★</div>
+    <div class="win-stats">
+      <div><b id="winTime">00:00</b><span data-i18n="winTime">用时</span></div>
+      <div><b id="winMoves">0</b><span data-i18n="winMoves">步数</span></div>
+      <div><b id="winHints">0</b><span data-i18n="winHints">提示次数</span></div>
+    </div>
+    <p id="winBest" style="color:var(--dim);font-size:12px"></p>
+    <div class="modal-actions">
+      <button class="ghost" id="btnWinClose" data-i18n="btnWinClose">关闭</button>
+      <button class="primary" id="btnWinAgain" data-i18n="btnWinAgain">再来一局</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ============================================================
+ * 语言：仅按浏览器首选语言自动判定 zh / en，不提供手动切换
+ * ============================================================ */
+const I18N = {
+  zh: {
+    appTitle:"You're the GC · 垃圾回收模拟器",
+    brandLine:"GC 模拟器 · {diff}模式",
+    boardHead:"内存网格", msgInitial:"点击左上角的对象堆开始整理内存。",
+    ariaBoard:"内存网格：方向键移动焦点，回车确认",
+    titleSound:"音效开关", titleHelp:"玩法说明",
+    boxStatus:"运行状态", statFreed:"已释放", statTotal:"待释放", statMoves:"步数", statTime:"用时",
+    boxGroups:"待释放组", groupsSub:"/ 组内对象数",
+    boxInspector:"对象检查器",
+    inspectorIdle:"选中任意格子查看堆信息。<br>提示：白色箭头 = 引用方向。",
+    inspectorSel:'<span class="tag">选中 ({x},{y})</span><br>堆内对象 <span class="k">{count}</span> 个 · 堆顶被 <span class="k">{holders}</span> 处引用<br>引用它 <span class="k">{holding}</span> 个对象 · 堆外引用 <span class="k">{external}</span> 条',
+    inspectorRoot:'<br><span style="color:var(--root)">ROOT 不可释放</span>',
+    chipGroup:'第 {n} 组 · <b>{size}</b> 个{done}',
+    boxActions:"操作", btnUndo:"↶ 撤销", btnScan:"◎ 扫描 Mark", btnHint:"✦ 提示", btnNew:"⟳ 新的一局",
+    diffEasy:"轻松", diffNormal:"普通", diffHard:"专家",
+    boxLegend:"图例", legendRoot:"ROOT 根对象", legendLive:"普通对象",
+    legendFree:"可释放候选", legendArrow:"引用箭头",
+    footerPrefix:"重构自 ", footerSuffix:"（Apache-2.0）· 单文件离线可运行",
+    footerKeys:"键盘：方向键 / Enter / Esc / Z / M / H / R",
+    ariaHelp:"玩法说明", ariaWin:"通关",
+    helpTitle:"你是垃圾回收器", helpSub:"You're the GC · 找出不可达对象，成组释放",
+    helpGoalH:"目标",
+    helpGoalP:"所有对象一开始堆在左上角 <b>HEAP</b> 格。从 <b>ROOT</b>（橙色）出发能沿箭头到达的对象是存活对象，<b>不可释放</b>；其余都是垃圾。把全部垃圾释放即通关。",
+    helpRulesH:"规则",
+    helpRule1:"白色箭头表示引用：<b>持有者 → 被引用者</b>。同一格内的引用不画线，把对象搬到不同格子才能看清引用图。",
+    helpRule2:"同一组的对象必须<b>全部堆在同一格</b>，且没有任何来自格子外部的引用，才能释放。",
+    helpRule3:"各组的大小见右侧「待释放组」清单；混有不同组的堆无法释放。",
+    helpOpsH:"操作",
+    helpOp1:"点非空格 <b>选中</b> → 再点<b>同一格</b>尝试释放；点<b>其它格</b>把堆顶对象搬过去。",
+    helpOp2:"键盘：<kbd>方向键</kbd> 移动焦点，<kbd>Enter</kbd>/<kbd>Space</kbd> 确认，<kbd>Esc</kbd> 取消选择。",
+    helpOp3:"<kbd>Z</kbd> 撤销 · <kbd>M</kbd> 扫描 · <kbd>H</kbd> 提示 · <kbd>R</kbd> 新局。",
+    helpToolsH:"辅助工具",
+    helpTool1:"<b>扫描 Mark</b>：执行标记阶段，临时显示每格「可达对象数 / 总数」。",
+    helpTool2:"<b>提示</b>：给出下一步搬运建议。扫描与提示都会计入提示次数，影响评星。",
+    btnStart:"开始回收",
+    winTitle:"内存已清空 🎉", winSub:"所有不可达对象都已释放",
+    winTime:"用时", winMoves:"步数", winHints:"提示次数",
+    btnWinClose:"关闭", btnWinAgain:"再来一局",
+    canvasHint:"搬开对象 → 显现引用图 → 按组释放",
+    errBounds:"超出网格范围",
+    errEmpty:"空格无法选中：请先点击左上角的对象堆",
+    errSrcEmpty:"源格为空", errEmptyFree:"空堆无法释放",
+    errRoot:"ROOT 是根对象，不能释放",
+    errLive:"堆内含从 ROOT 可达的存活对象，不能释放",
+    errMixed:"堆内混有不同组的对象，请把同组对象单独堆放",
+    errIncomplete:"这一组共 {size} 个对象，当前堆只有 {count} 个，还没集齐",
+    errRefs:"仍有来自其它格子的引用指向此堆，无法释放",
+    msgSelect:"已选中 ({x},{y}) · 再点一次尝试释放，点其它格搬运堆顶，Esc 取消",
+    msgMove:"已搬运 1 个对象 → ({x},{y})",
+    msgFree:"✓ 释放 {count} 个不可达对象",
+    hintNone:"没有需要整理的对象了",
+    hintRoot:"提示：堆顶是 ROOT，先把它搬到任意空格，让下面的对象露出来（ROOT 永不释放）",
+    hintLive:"提示：这是从 ROOT 可达的存活对象，搬到一侧单独放好，不能释放",
+    hintGroup:"提示：堆顶对象属于第 {n} 组（共 {size} 个），建议搬到 ({x},{y})",
+    hintGroupNoCell:"提示：堆顶对象属于第 {n} 组（共 {size} 个）",
+    msgCancel:"已取消选择", msgUndo:"↶ 已撤销上一步",
+    msgMark:"◎ Mark 完成：每格显示「可达数/总数」，0/N 即整堆均为垃圾（3 秒）",
+    toastMark:"标记阶段完成，绿色轮廓 = 可释放候选",
+    msgNewGame:"新的一局：点击左上角 HEAP 堆，开始整理内存。",
+    toastDiff:"已切换到「{diff}」模式", toastHint:"已使用一次提示，会影响评星",
+    toastNoUndo:"没有可撤销的操作", toastSoundOn:"音效已开启", toastSoundOff:"音效已关闭",
+    winBestNew:"🏆 新纪录！", winBest:"本难度最佳：{time}",
+  },
+  en: {
+    appTitle:"You're the GC · Garbage Collector Simulator",
+    brandLine:"GC Simulator · {diff}",
+    boardHead:"MEMORY GRID", msgInitial:"Click the heap in the top-left cell to start.",
+    ariaBoard:"Memory grid: arrow keys move focus, Enter confirms",
+    titleSound:"Sound on/off", titleHelp:"How to play",
+    boxStatus:"RUN STATUS", statFreed:"Freed", statTotal:"To free", statMoves:"Moves", statTime:"Time",
+    boxGroups:"GROUPS TO FREE", groupsSub:"/ objects per group",
+    boxInspector:"INSPECTOR",
+    inspectorIdle:"Select any cell to inspect its stack.<br>White arrows are references.",
+    inspectorSel:'<span class="tag">Cell ({x},{y})</span><br><span class="k">{count}</span> in stack · top referenced by <span class="k">{holders}</span><br>Points to <span class="k">{holding}</span> · external refs <span class="k">{external}</span>',
+    inspectorRoot:'<br><span style="color:var(--root)">ROOT cannot be freed</span>',
+    chipGroup:'Group {n} · <b>{size}</b> obj(s){done}',
+    boxActions:"ACTIONS", btnUndo:"↶ Undo", btnScan:"◎ Mark scan", btnHint:"✦ Hint", btnNew:"⟳ New game",
+    diffEasy:"Casual", diffNormal:"Normal", diffHard:"Expert",
+    boxLegend:"LEGEND", legendRoot:"ROOT object", legendLive:"Live object",
+    legendFree:"Freeable candidate", legendArrow:"Reference arrow",
+    footerPrefix:"Refactored from ", footerSuffix:" (Apache-2.0) · single file, works offline",
+    footerKeys:"Keys: Arrows / Enter / Esc / Z / M / H / R",
+    ariaHelp:"How to play", ariaWin:"Level complete",
+    helpTitle:"You're the Garbage Collector", helpSub:"Find unreachable objects, free them group by group",
+    helpGoalH:"Goal",
+    helpGoalP:"Every object starts stacked in the top-left <b>HEAP</b> cell. Anything reachable from <b>ROOT</b> (orange) along the arrows is alive and <b>cannot be freed</b>; everything else is garbage. Free all garbage to win.",
+    helpRulesH:"Rules",
+    helpRule1:"A white arrow is a reference: <b>holder → target</b>. References inside one cell are not drawn, so move objects apart to reveal the graph.",
+    helpRule2:"All objects of a group must be <b>stacked in one cell</b> with no references coming from outside that cell before they can be freed.",
+    helpRule3:"Group sizes are listed under \"GROUPS TO FREE\" on the right; a stack mixing groups can never be freed.",
+    helpOpsH:"Controls",
+    helpOp1:"Click a non-empty cell to <b>select</b> → click the <b>same cell</b> to try freeing; click <b>another cell</b> to move the top object.",
+    helpOp2:"Keyboard: <kbd>Arrows</kbd> move focus, <kbd>Enter</kbd>/<kbd>Space</kbd> confirm, <kbd>Esc</kbd> cancels selection.",
+    helpOp3:"<kbd>Z</kbd> undo · <kbd>M</kbd> scan · <kbd>H</kbd> hint · <kbd>R</kbd> new game.",
+    helpToolsH:"Tools",
+    helpTool1:"<b>Mark scan</b>: runs the mark phase, briefly showing \"reachable / total\" on every cell.",
+    helpTool2:"<b>Hint</b>: suggests the next move. Scans and hints both count against your star rating.",
+    btnStart:"Start collecting",
+    winTitle:"Memory cleared 🎉", winSub:"All unreachable objects have been freed",
+    winTime:"Time", winMoves:"Moves", winHints:"Hints used",
+    btnWinClose:"Close", btnWinAgain:"Play again",
+    canvasHint:"Move → reveal refs → free by group",
+    errBounds:"Out of grid bounds",
+    errEmpty:"Empty cell: start with the top-left heap",
+    errSrcEmpty:"Source cell is empty", errEmptyFree:"Cannot free an empty stack",
+    errRoot:"ROOT is the root object and cannot be freed",
+    errLive:"This stack contains objects reachable from ROOT and cannot be freed",
+    errMixed:"This stack mixes different groups; keep each group in its own cell",
+    errIncomplete:"This group has {size} objects but the stack only has {count}; keep collecting",
+    errRefs:"References from other cells still point into this stack; cannot free",
+    msgSelect:"Selected ({x},{y}) · click again to free, another cell to move the top object, Esc to cancel",
+    msgMove:"Moved 1 object → ({x},{y})",
+    msgFree:"✓ Freed {count} unreachable object(s)",
+    hintNone:"Nothing left to sort",
+    hintRoot:"Hint: ROOT is on top — move it to any empty cell to expose the objects below (ROOT is never freed)",
+    hintLive:"Hint: this object is reachable from ROOT; set it aside, it cannot be freed",
+    hintGroup:"Hint: the top object belongs to group {n} ({size} objects) — move it to ({x},{y})",
+    hintGroupNoCell:"Hint: the top object belongs to group {n} ({size} objects)",
+    msgCancel:"Selection cancelled", msgUndo:"↶ Undone",
+    msgMark:"◎ Mark complete: each cell shows \"reachable/total\" — 0/N means the whole stack is garbage (3 s)",
+    toastMark:"Mark phase complete; green outline = freeable candidate",
+    msgNewGame:"New game: click the top-left HEAP stack to start.",
+    toastDiff:"Switched to {diff} mode", toastHint:"Hint used — it affects your star rating",
+    toastNoUndo:"Nothing to undo", toastSoundOn:"Sound on", toastSoundOff:"Sound off",
+    winBestNew:"🏆 New record!", winBest:"Best for this difficulty: {time}",
+  },
+};
+
+/** 只读取浏览器首选语言；非中文一律回退英文（仅支持中英，无手动切换） */
+function detectLanguage(){
+  const nav = (typeof navigator !== "undefined") ? navigator : null;
+  let primary = "";
+  if (nav){
+    primary = (Array.isArray(nav.languages) && nav.languages[0]) || nav.language ||
+              nav.userLanguage || nav.browserLanguage || "";
+  }
+  if (!primary && typeof document !== "undefined") primary = document.documentElement.lang || "";
+  const declared = nav ? (nav.language || nav.userLanguage || nav.browserLanguage || "") : "";
+  const isZh = s => /^zh(?:-|$)/i.test(String(s).trim());
+  return (isZh(primary) || isZh(declared)) ? "zh" : "en";
+}
+const LANG = detectLanguage();
+
+/** 取词并替换 {name} 占位符 */
+function t(key, vars){
+  const dict = I18N[LANG] || I18N.en;
+  let s = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] :
+          (Object.prototype.hasOwnProperty.call(I18N.en, key) ? I18N.en[key] : key);
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) =>
+    Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m);
+  return s;
+}
+
+/* ============================================================
+ * 配置
+ * ============================================================ */
+const CONFIG = {
+  easy:   { labelKey:"diffEasy",   size:7, live:8,  groups:[4,3,2,1],           noise:14, extraLiveRefs:5  },
+  normal: { labelKey:"diffNormal", size:9, live:17, groups:[7,5,6,8,1,1,1,1],   noise:45, extraLiveRefs:16 }, // 原作参数
+  hard:   { labelKey:"diffHard",   size:9, live:20, groups:[9,7,6,5,4,3,2,1,1], noise:70, extraLiveRefs:24 },
+};
+
+/** 可复现随机数，便于测试 */
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ============================================================
+ * 引擎：不依赖 DOM，纯数据模型
+ * ------------------------------------------------------------
+ * 对象 { id, type, groupId, x, y, holders:Set<id>, holding:Set<id> }
+ *   type 0 = ROOT, 1 = 存活对象, 2 = 垃圾（groupId 区分组）
+ *   holders = 引用我的对象；holding = 我引用的对象
+ * grid[y * size + x] = 该格的对象 id 栈（数组末尾为堆顶）
+ * ============================================================ */
+class GCEngine {
+  constructor(diff = "normal", rng = Math.random){
+    this.diff = CONFIG[diff] ? diff : "normal";
+    this.cfg = CONFIG[this.diff];
+    this.rng = rng;
+    this.reset();
+  }
+
+  reset(){
+    const c = this.cfg;
+    this.size = c.size;
+    this.objects = new Map();
+    this.nextId = 1;
+    this.grid = Array.from({length:this.size * this.size}, () => []);
+    this.groups = c.groups.map((size, id) => ({id, size, freed:false}));
+    this.totalGarbage = c.groups.reduce((a,b) => a + b, 0);
+    this.freed = 0;
+    this.moves = 0;
+    this.hints = 0;
+    this.scans = 0;
+    this.selection = null;
+    this.startTime = Date.now();
+    this._build();
+  }
+
+  _newObj(type, groupId){
+    const o = {id:this.nextId++, type, groupId, x:0, y:0, holders:new Set(), holding:new Set()};
+    this.objects.set(o.id, o);
+    return o;
+  }
+
+  _edge(holder, target){
+    if (holder.id === target.id) return;
+    holder.holding.add(target.id);
+    target.holders.add(holder.id);
+  }
+
+  _randInt(n){ return Math.floor(this.rng() * n); }
+
+  _build(){
+    // 1) ROOT + 存活链（保证全部可达）
+    const root = this._newObj(0, null);
+    this.rootId = root.id;
+    const live = [];
+    let last = root;
+    for (let i = 0; i < this.cfg.live; i++){
+      const o = this._newObj(1, null);
+      live.push(o);
+      this._edge(last, o);
+      last = o;
+    }
+    for (let i = 0; i < this.cfg.extraLiveRefs; i++){
+      const holder = live[this._randInt(live.length)];
+      const idx = this._randInt(live.length + 1);
+      this._edge(holder, idx < live.length ? live[idx] : root);
+    }
+
+    // 2) 垃圾组：组内引用闭环（链 / 回边 / 分叉 / 合并）
+    const garbage = [];
+    for (const g of this.groups){
+      const arr = [];
+      for (let i = 0; i < g.size; i++) arr.push(this._newObj(2, g.id));
+      let linked = 1; // arr[0] 为本组根
+      while (linked < arr.length){
+        const start = linked;
+        const len = 1 + this._randInt(arr.length - start);
+        const end = Math.min(arr.length, start + len);
+        for (let i = start + 1; i < end; i++){
+          this._edge(arr[i-1], arr[i]);
+          if (this.rng() < 0.5) this._edge(arr[i], arr[i-1]); // 回边
+        }
+        this._edge(arr[this._randInt(start)], arr[start]);          // 分叉
+        this._edge(arr[end-1], arr[this._randInt(start)]);          // 合并
+        linked = end;
+      }
+      garbage.push(...arr);
+    }
+
+    // 3) 干扰引用：垃圾 → 存活对象/ROOT（让引用图更具迷惑性，但不妨碍可解性）
+    for (let i = 0; i < this.cfg.noise; i++){
+      const holder = garbage[this._randInt(garbage.length)];
+      const idx = this._randInt(live.length + 1);
+      this._edge(holder, idx < live.length ? live[idx] : root);
+    }
+
+    // 4) 全部打乱堆入 HEAP(0,0)，ROOT 置于堆顶
+    const all = [...live, ...garbage];
+    for (let i = all.length - 1; i > 0; i--){
+      const j = this._randInt(i + 1);
+      [all[i], all[j]] = [all[j], all[i]];
+    }
+    const heap = this.stack(0, 0);
+    for (const o of all) heap.push(o.id);
+    heap.push(root.id);
+  }
+
+  inBounds(x, y){ return x >= 0 && y >= 0 && x < this.size && y < this.size; }
+  stack(x, y){ return this.grid[y * this.size + x]; }
+  top(x, y){ const s = this.stack(x, y); return s.length ? this.objects.get(s[s.length - 1]) : null; }
+
+  /** 从 ROOT 沿 holding 做标记（Mark 阶段） */
+  markReachable(){
+    const seen = new Set();
+    const queue = [this.rootId];
+    while (queue.length){
+      const id = queue.pop();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const o = this.objects.get(id);
+      if (!o) continue;
+      for (const t of o.holding) queue.push(t);
+    }
+    return seen;
+  }
+
+  /** 某堆的诊断信息（不泄露分组答案） */
+  analyze(x, y){
+    const ids = this.stack(x, y);
+    if (!ids.length) return {count:0};
+    const set = new Set(ids);
+    const top = this.objects.get(ids[ids.length - 1]);
+    let external = 0, internal = 0;
+    for (const id of ids){
+      const o = this.objects.get(id);
+      for (const h of o.holders) set.has(h) ? internal++ : external++;
+    }
+    return {
+      count: ids.length,
+      topIsRoot: top.type === 0,
+      holders: top.holders.size,
+      holding: top.holding.size,
+      internal, external,
+      reachable: this.markReachable().has(top.id),
+    };
+  }
+
+  /** 统一点击入口：选中 / 移动 / 释放 */
+  click(x, y){
+    if (!this.inBounds(x, y)) return {ok:false, msg:t("errBounds")};
+    if (this.selection){
+      const s = this.selection;
+      this.selection = null;
+      if (s.x === x && s.y === y) return this.free(x, y);
+      return this.move(s.x, s.y, x, y);
+    }
+    if (!this.stack(x, y).length){
+      return {ok:false, code:"empty", msg:t("errEmpty")};
+    }
+    this.selection = {x, y};
+    return {ok:true, action:"select", x, y,
+      msg:t("msgSelect", {x, y})};
+  }
+
+  cancel(){ this.selection = null; }
+
+  move(sx, sy, dx, dy){
+    if (!this.inBounds(sx, sy) || !this.inBounds(dx, dy)) return {ok:false, msg:t("errBounds")};
+    const src = this.stack(sx, sy);
+    if (!src.length) return {ok:false, msg:t("errSrcEmpty")};
+    const id = src.pop();
+    const o = this.objects.get(id);
+    const dst = this.stack(dx, dy);
+    const LAST = dst.length - 1;
+    if (LAST < 0 || this.objects.get(dst[LAST]).type > 0){
+      dst.push(id);                       // 普通堆叠
+    } else {
+      dst.push(dst[LAST]);                // 目标是 ROOT：把 ROOT 保持在堆顶
+      dst[LAST] = id;
+    }
+    o.x = dx; o.y = dy;
+    this.moves++;
+    return {ok:true, action:"move", objId:id, from:{x:sx,y:sy}, to:{x:dx,y:dy},
+      msg:t("msgMove", {x:dx, y:dy})};
+  }
+
+  free(x, y){
+    const ids = this.stack(x, y).slice();
+    if (!ids.length) return {ok:false, msg:t("errEmptyFree")};
+    const objs = ids.map(id => this.objects.get(id));
+    if (objs.some(o => o.type === 0)) return {ok:false, code:"root", msg:t("errRoot")};
+    if (objs.some(o => o.type === 1))
+      return {ok:false, code:"live", msg:t("errLive")};
+    const gid = objs[objs.length - 1].groupId;
+    // 修复原作缺陷：混合堆即使数量凑巧相等也不允许释放
+    if (objs.some(o => o.groupId !== gid))
+      return {ok:false, code:"mixed", msg:t("errMixed")};
+    const g = this.groups[gid];
+    if (ids.length !== g.size)
+      return {ok:false, code:"incomplete",
+        msg:t("errIncomplete", {size:g.size, count:ids.length})};
+    const inHeap = new Set(ids);
+    for (const o of objs){
+      for (const h of o.holders){
+        if (!inHeap.has(h))
+          return {ok:false, code:"refs", msg:t("errRefs")};
+      }
+    }
+    // 执行回收：断开所有出边，并从存活对象的 holders 中移除这些垃圾
+    for (const o of objs){
+      for (const tid of o.holding){
+        const target = this.objects.get(tid);
+        if (target) target.holders.delete(o.id);
+      }
+      o.holding.clear();
+      o.holders.clear();
+      this.objects.delete(o.id);
+    }
+    this.grid[y * this.size + x] = [];
+    g.freed = true;
+    this.freed += ids.length;
+    return {ok:true, action:"free", count:ids.length, groupId:gid, x, y,
+      msg:t("msgFree", {count:ids.length}), complete:this.isComplete()};
+  }
+
+  /** 下一步建议 */
+  hint(){
+    const findEmpty = () => {
+      for (let y = 0; y < this.size; y++) for (let x = 0; x < this.size; x++){
+        if ((x !== 0 || y !== 0) && !this.stack(x, y).length) return {x, y};
+      }
+      return null;
+    };
+    let target = null, origin = null;
+    const heap = this.stack(0, 0);
+    if (heap.length){
+      target = this.objects.get(heap[heap.length - 1]);
+      origin = {x:0, y:0};
+    } else {
+      outer: for (let y = 0; y < this.size; y++) for (let x = 0; x < this.size; x++){
+        const topObj = this.top(x, y);
+        if (topObj && topObj.type > 1){ target = topObj; origin = {x, y}; break outer; }
+      }
+    }
+    if (!target) return {ok:false, msg:t("hintNone")};
+    this.hints++;
+    if (target.type === 0){
+      return {ok:true, from:origin, to:findEmpty(), msg:t("hintRoot")};
+    }
+    if (target.type === 1){
+      return {ok:true, from:origin, to:findEmpty(), msg:t("hintLive")};
+    }
+    let best = null, bestCount = 0;
+    for (let y = 0; y < this.size; y++) for (let x = 0; x < this.size; x++){
+      if (x === origin.x && y === origin.y) continue;
+      const c = this.stack(x, y).filter(id => this.objects.get(id) && this.objects.get(id).groupId === target.groupId).length;
+      if (c > bestCount){ bestCount = c; best = {x, y}; }
+    }
+    if (!best) best = findEmpty();
+    const g = this.groups[target.groupId];
+    return {ok:true, from:origin, to:best, groupId:target.groupId, size:g.size,
+      msg: best
+        ? t("hintGroup", {n:target.groupId + 1, size:g.size, x:best.x, y:best.y})
+        : t("hintGroupNoCell", {n:target.groupId + 1, size:g.size})};
+  }
+
+  isComplete(){ return this.freed === this.totalGarbage; }
+
+  elapsed(){ return Math.floor((Date.now() - this.startTime) / 1000); }
+
+  snapshot(){
+    return {
+      grid: this.grid.map(s => s.slice()),
+      objects: [...this.objects.values()].map(o => ({
+        id:o.id, type:o.type, groupId:o.groupId, x:o.x, y:o.y,
+        holders:[...o.holders], holding:[...o.holding],
+      })),
+      groups: this.groups.map(g => ({...g})),
+      freed:this.freed, moves:this.moves,
+      selection:this.selection ? {...this.selection} : null,
+      nextId:this.nextId, startTime:this.startTime,
+    };
+  }
+
+  restore(s){
+    this.grid = s.grid.map(a => a.slice());
+    this.objects = new Map();
+    for (const o of s.objects){
+      this.objects.set(o.id, {...o, holders:new Set(o.holders), holding:new Set(o.holding)});
+    }
+    this.groups = s.groups.map(g => ({...g}));
+    this.freed = s.freed; this.moves = s.moves;
+    this.selection = s.selection;
+    this.nextId = s.nextId; this.startTime = s.startTime;
+    // hints / scans 属于玩家行为记录，撤销不回退
+  }
+}
+
+/* 供离线自测使用（浏览器中无副作用） */
+globalThis.GCEngine = GCEngine;
+globalThis.GC_CONFIG = CONFIG;
+globalThis.GC_mulberry32 = mulberry32;
+
+/* ============================================================
+ * 渲染器
+ * ============================================================ */
+class Renderer {
+  constructor(canvas, engine){
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.engine = engine;
+    this.size = 0;
+    this.cell = 0;
+    this.dpr = 1;
+    this.suppress = new Set();   // 动画期间不按静态位置绘制的对象
+    this.particles = [];
+    this.resize();
+  }
+
+  resize(){
+    const rect = this.canvas.getBoundingClientRect();
+    const cssSize = Math.max(1, Math.round(rect.width || 360));
+    this.dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.round(cssSize * this.dpr);
+    this.canvas.height = Math.round(cssSize * this.dpr);
+    this.size = cssSize;
+    this.cell = cssSize / this.engine.size;
+  }
+
+  rr(x, y, w, h, r){
+    const c = this.ctx;
+    if (c.roundRect){ c.beginPath(); c.roundRect(x, y, w, h, r); return; }
+    r = Math.min(r, w/2, h/2);
+    c.beginPath();
+    c.moveTo(x+r, y); c.arcTo(x+w, y, x+w, y+h, r); c.arcTo(x+w, y+h, x, y+h, r);
+    c.arcTo(x, y+h, x, y, r); c.arcTo(x, y, x+w, y, r); c.closePath();
+  }
+
+  center(x, y){ return [(x + 0.5) * this.cell, (y + 0.5) * this.cell]; }
+
+  draw(view){
+    const e = this.engine, c = this.ctx, n = e.size, cell = this.cell, S = this.size;
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    c.clearRect(0, 0, S, S);
+
+    // 背景
+    const bg = c.createLinearGradient(0, 0, S, S);
+    bg.addColorStop(0, "#0a1222"); bg.addColorStop(1, "#05080f");
+    c.fillStyle = bg; c.fillRect(0, 0, S, S);
+
+    // HEAP 区底色
+    c.fillStyle = "rgba(56,189,248,.055)";
+    c.fillRect(0, 0, cell, cell);
+
+    // 网格
+    c.strokeStyle = "rgba(120,155,205,.13)"; c.lineWidth = 1;
+    c.beginPath();
+    for (let i = 0; i <= n; i++){
+      const p = Math.round(i * cell) + .5;
+      c.moveTo(p, 0); c.lineTo(p, S);
+      c.moveTo(0, p); c.lineTo(S, p);
+    }
+    c.stroke();
+
+    // 引用箭头（先画，压在方块下）
+    this._drawEdges(view);
+
+    // 方块
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++){
+      this._drawStack(x, y, view);
+    }
+
+    // HEAP 标签（置于方块上沿之上，避免遮挡）
+    c.fillStyle = "rgba(120,205,255,.9)";
+    c.font = `700 ${Math.max(7, Math.min(9, cell * .16))}px ui-monospace,monospace`;
+    c.textAlign = "left"; c.textBaseline = "top";
+    c.fillText("HEAP", 3, 2);
+
+    // 首次引导文字
+    if (e.moves === 0 && !view.marked){
+      c.fillStyle = "rgba(150,180,220,.34)";
+      c.font = `500 ${Math.max(11, Math.min(15, S * .022))}px system-ui,sans-serif`;
+      c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillText(t("canvasHint"), S / 2, S / 2);
+    }
+
+    // 覆盖层：扫描结果 / 提示 / 焦点 / 选中
+    this._drawOverlays(view);
+    this._drawParticles();
+  }
+
+  _drawEdges(view){
+    const e = this.engine, c = this.ctx, cell = this.cell;
+    const edges = new Map();
+    for (const o of e.objects.values()){
+      for (const hid of o.holders){
+        const h = e.objects.get(hid);
+        if (!h || (h.x === o.x && h.y === o.y)) continue; // 同格引用不显示
+        const key = `${h.x},${h.y}>${o.x},${o.y}`;
+        if (!edges.has(key)) edges.set(key, {hx:h.x, hy:h.y, tx:o.x, ty:o.y, count:0});
+        edges.get(key).count++;
+      }
+    }
+    const sel = view.selection;
+    for (const ed of edges.values()){
+      const [x1, y1] = this.center(ed.hx, ed.hy);
+      const [x2, y2] = this.center(ed.tx, ed.ty);
+      const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      const pad = cell * .32;
+      const ax = x1 + ux * pad, ay = y1 + uy * pad;
+      const bx = x2 - ux * pad, by = y2 - uy * pad;
+      const active = sel && ((sel.x === ed.hx && sel.y === ed.hy) || (sel.x === ed.tx && sel.y === ed.ty));
+      c.strokeStyle = active ? "rgba(56,224,176,.95)" : "rgba(226,238,255,.30)";
+      c.lineWidth = active ? 2 : 1.15;
+      c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+      // 箭头
+      const a = Math.atan2(dy, dx), wing = cell * .17;
+      c.fillStyle = active ? "rgba(56,224,176,.95)" : "rgba(226,238,255,.42)";
+      c.beginPath();
+      c.moveTo(bx, by);
+      c.lineTo(bx - Math.cos(a - .45) * wing, by - Math.sin(a - .45) * wing);
+      c.lineTo(bx - Math.cos(a + .45) * wing, by - Math.sin(a + .45) * wing);
+      c.closePath(); c.fill();
+      // 重合的多条引用显示条数
+      if (ed.count > 1){
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        c.fillStyle = "rgba(10,18,32,.9)"; c.beginPath(); c.arc(mx, my, 8, 0, 7); c.fill();
+        c.strokeStyle = "rgba(140,180,230,.45)"; c.lineWidth = 1; c.stroke();
+        c.fillStyle = "#cfe2ff"; c.font = "600 10px ui-monospace,monospace";
+        c.textAlign = "center"; c.textBaseline = "middle";
+        c.fillText(String(ed.count), mx, my + .5);
+      }
+    }
+  }
+
+  _drawStack(x, y, view){
+    const e = this.engine, c = this.ctx, cell = this.cell;
+    const ids = e.stack(x, y).filter(id => !this.suppress.has(id));
+    if (!ids.length) return;
+    const top = e.objects.get(ids[ids.length - 1]);
+    const cx = (x + .5) * cell, cy = (y + .5) * cell;
+    const w = cell * .70, off = (cell - w) / 2;
+    const px = x * cell + off, py = y * cell + off;
+
+    // 堆叠层次
+    for (let k = Math.min(ids.length, 3) - 1; k > 0; k--){
+      c.fillStyle = "rgba(120,145,185,.22)";
+      this.rr(px + k * 3.2, py - k * 3.2, w, w, w * .18); c.fill();
+    }
+    // 主体
+    const isRoot = top.type === 0;
+    if (isRoot){
+      c.shadowColor = "rgba(251,146,60,.65)"; c.shadowBlur = cell * .34;
+    }
+    const grad = c.createLinearGradient(px, py, px + w, py + w);
+    if (isRoot){ grad.addColorStop(0, "#ffb35c"); grad.addColorStop(1, "#ea6a2a"); }
+    else { grad.addColorStop(0, "#aebbd0"); grad.addColorStop(1, "#6d7f9c"); }
+    c.fillStyle = grad;
+    this.rr(px, py, w, w, w * .2); c.fill();
+    c.shadowBlur = 0;
+    c.strokeStyle = isRoot ? "rgba(255,214,160,.9)" : "rgba(226,238,255,.35)";
+    c.lineWidth = 1; this.rr(px, py, w, w, w * .2); c.stroke();
+
+    if (isRoot){
+      c.fillStyle = "#5b2a05"; c.font = `800 ${Math.max(9, w * .42)}px ui-monospace,monospace`;
+      c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillText("R", cx, cy + 1);
+    } else {
+      c.fillStyle = "rgba(20,32,52,.5)";
+      c.beginPath(); c.arc(cx, cy, Math.max(2, w * .11), 0, 7); c.fill();
+    }
+
+    // 数量角标
+    if (ids.length > 1){
+      const r = Math.max(8, cell * .17);
+      c.fillStyle = "rgba(10,18,32,.94)";
+      c.beginPath(); c.arc(px + w + 1, py + w + 1, r, 0, 7); c.fill();
+      c.strokeStyle = "rgba(56,189,248,.65)"; c.lineWidth = 1; c.stroke();
+      c.fillStyle = "#9fe6ff"; c.font = `700 ${Math.max(9, r * 1.05)}px ui-monospace,monospace`;
+      c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillText(String(ids.length), px + w + 1, py + w + 2);
+    }
+
+    // 扫描结果：可达数 / 总数
+    if (view.marked){
+      const reach = ids.filter(id => view.marked.has(id)).length;
+      c.fillStyle = reach === 0 ? "#38e0b0" : "#ffd27a";
+      c.font = `700 ${Math.max(9, cell * .19)}px ui-monospace,monospace`;
+      c.textAlign = "left"; c.textBaseline = "top";
+      c.fillText(`${reach}/${ids.length}`, x * cell + 3, y * cell + cell - cell * .22);
+      if (reach === 0){
+        c.strokeStyle = "rgba(56,224,176,.85)"; c.lineWidth = 2;
+        this.rr(px - 2, py - 2, w + 4, w + 4, w * .22); c.stroke();
+      }
+    }
+  }
+
+  _drawOverlays(view){
+    const c = this.ctx, cell = this.cell;
+    const frame = (x, y, color, dashed, width) => {
+      c.save();
+      c.strokeStyle = color; c.lineWidth = width || 2;
+      if (dashed) c.setLineDash([4, 3]);
+      this.rr(x * cell + 2, y * cell + 2, cell - 4, cell - 4, 5); c.stroke();
+      c.restore();
+    };
+    if (view.focus) frame(view.focus.x, view.focus.y, "rgba(56,189,248,.55)", true, 1.5);
+    if (view.hintCell) frame(view.hintCell.x, view.hintCell.y, "rgba(250,204,21,.95)", false, 2.5);
+    if (view.selection){
+      const {x, y} = view.selection;
+      frame(x, y, "rgba(56,224,176,.95)", false, 2.5);
+      // 四角装饰
+      c.strokeStyle = "#38e0b0"; c.lineWidth = 2.5;
+      const L = cell * .18, m = 3;
+      const corners = [[x*cell+m, y*cell+m, 1, 1], [(x+1)*cell-m, y*cell+m, -1, 1],
+                       [x*cell+m, (y+1)*cell-m, 1, -1], [(x+1)*cell-m, (y+1)*cell-m, -1, -1]];
+      for (const [cx, cy, sx, sy] of corners){
+        c.beginPath(); c.moveTo(cx + sx*L, cy); c.lineTo(cx, cy); c.lineTo(cx, cy + sy*L); c.stroke();
+      }
+    }
+    // 飞行动画对象
+    if (view.fly){
+      const f = view.fly;
+      const w = cell * .70, off = (cell - w) / 2;
+      const px = f.x * cell + off, py = f.y * cell + off;
+      c.save(); c.shadowColor = "rgba(56,224,176,.8)"; c.shadowBlur = 16;
+      const grad = c.createLinearGradient(px, py, px+w, py+w);
+      grad.addColorStop(0, "#cfe6ff"); grad.addColorStop(1, "#7d97bd");
+      c.fillStyle = grad; this.rr(px, py, w, w, w*.2); c.fill();
+      c.restore();
+    }
+  }
+
+  burst(x, y, count){
+    const [cx, cy] = this.center(x, y);
+    const colors = ["#38e0b0", "#38bdf8", "#a7f3d0", "#fbbf24"];
+    for (let i = 0; i < count * 3; i++){
+      const a = Math.random() * Math.PI * 2, v = 1.4 + Math.random() * 3.4;
+      this.particles.push({x:cx, y:cy, vx:Math.cos(a)*v, vy:Math.sin(a)*v - 1,
+        life:1, r:1.5 + Math.random()*2.5, color:colors[i % colors.length]});
+    }
+  }
+
+  _drawParticles(){
+    const c = this.ctx;
+    for (const p of this.particles){
+      c.globalAlpha = Math.max(0, p.life);
+      c.fillStyle = p.color;
+      c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill();
+    }
+    c.globalAlpha = 1;
+  }
+
+  tickParticles(){
+    if (!this.particles.length) return false;
+    for (const p of this.particles){
+      p.x += p.vx; p.y += p.vy; p.vy += .16; p.vx *= .99; p.life -= .028;
+    }
+    this.particles = this.particles.filter(p => p.life > 0);
+    return true;
+  }
+}
+
+/* ============================================================
+ * 应用控制层
+ * ============================================================ */
+if (typeof document !== "undefined" && document.getElementById("board")) {
+
+const $ = id => document.getElementById(id);
+const REDUCED = globalThis.matchMedia && globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+class App {
+  constructor(){
+    this.diff = "normal";
+    this.engine = new GCEngine(this.diff);
+    this.renderer = new Renderer($("board"), this.engine);
+    this.history = [];
+    this.focus = {x:0, y:0};
+    this.view = {selection:null, focus:null, marked:null, hintCell:null, fly:null};
+    this.anim = null;
+    this.markTimer = null;
+    this.hintTimer = null;
+    this.toastTimer = null;
+    this.dirty = true;
+    this.running = false;
+    this.sound = this._load("gc_sound", true);
+    this.best = this._load("gc_best", {});
+    this._applyStaticI18N();
+    this._bind();
+    this._syncStatic();
+    this._updateHUD();
+    this._loop();
+    this.timer = setInterval(() => this._updateHUD(), 1000);
+    if (!this._load("gc_help_seen", false)) this._openModal("helpModal");
+  }
+
+  /* ---------- 存储 ---------- */
+  _load(key, fallback){
+    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); }
+    catch (_) { return fallback; }
+  }
+  _save(key, value){ try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {} }
+
+  /* ---------- 音效 ---------- */
+  _beep(freq, dur, type){
+    if (!this.sound) return;
+    try {
+      const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+      if (!AC) return;
+      this._ac = this._ac || new AC();
+      if (this._ac.state === "suspended") this._ac.resume();
+      const o = this._ac.createOscillator(), g = this._ac.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(.06, this._ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(.0001, this._ac.currentTime + dur);
+      o.connect(g); g.connect(this._ac.destination);
+      o.start(); o.stop(this._ac.currentTime + dur);
+    } catch (_) {}
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  _bind(){
+    const cv = $("board");
+    cv.addEventListener("pointerdown", ev => {
+      ev.preventDefault();
+      const r = cv.getBoundingClientRect();
+      const x = Math.floor((ev.clientX - r.left) / r.width * this.engine.size);
+      const y = Math.floor((ev.clientY - r.top) / r.height * this.engine.size);
+      this.focus = {x, y};
+      this._act(x, y);
+    });
+    cv.addEventListener("contextmenu", ev => ev.preventDefault());
+
+    document.addEventListener("keydown", ev => {
+      const modalOpen = $("helpModal").classList.contains("show") || $("winModal").classList.contains("show");
+      if (ev.key === "Escape"){
+        if (modalOpen) this._closeModals();
+        else this._cancelSelection();
+        return;
+      }
+      if (modalOpen) return;
+      const k = ev.key.toLowerCase();
+      const dirs = {arrowleft:[-1,0], arrowright:[1,0], arrowup:[0,-1], arrowdown:[0,1]};
+      if (dirs[k]){
+        ev.preventDefault();
+        const n = this.engine.size;
+        this.focus.x = Math.max(0, Math.min(n-1, this.focus.x + dirs[k][0]));
+        this.focus.y = Math.max(0, Math.min(n-1, this.focus.y + dirs[k][1]));
+        this.view.focus = {...this.focus}; this.requestRender(); return;
+      }
+      if (ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); this._act(this.focus.x, this.focus.y); return; }
+      if (k === "z"){ this.undo(); return; }
+      if (k === "m"){ this.scan(); return; }
+      if (k === "h"){ this.hint(); return; }
+      if (k === "r"){ this.newGame(this.diff); return; }
+    });
+
+    $("btnUndo").addEventListener("click", () => this.undo());
+    $("btnScan").addEventListener("click", () => this.scan());
+    $("btnHint").addEventListener("click", () => this.hint());
+    $("btnNew").addEventListener("click", () => this.newGame(this.diff));
+    $("btnHelp").addEventListener("click", () => this._openModal("helpModal"));
+    $("btnHelpClose").addEventListener("click", () => { this._save("gc_help_seen", true); this._closeModals(); });
+    $("btnWinClose").addEventListener("click", () => this._closeModals());
+    $("btnWinAgain").addEventListener("click", () => { this._closeModals(); this.newGame(this.diff); });
+    $("btnSound").addEventListener("click", () => {
+      this.sound = !this.sound; this._save("gc_sound", this.sound);
+      $("btnSound").textContent = this.sound ? "♪" : "♪̸";
+      $("btnSound").style.opacity = this.sound ? "1" : ".45";
+      this._toast(this.sound ? t("toastSoundOn") : t("toastSoundOff"));
+    });
+    $("difficulty").addEventListener("click", ev => {
+      const b = ev.target.closest("button[data-diff]");
+      if (b) this.newGame(b.dataset.diff);
+    });
+    for (const id of ["helpModal", "winModal"]){
+      $(id).addEventListener("click", ev => { if (ev.target.id === id) this._closeModals(); });
+    }
+    if (globalThis.ResizeObserver){
+      new ResizeObserver(() => { this.renderer.resize(); this.requestRender(); }).observe(cv);
+    } else {
+      globalThis.addEventListener("resize", () => { this.renderer.resize(); this.requestRender(); });
+    }
+  }
+
+  /** 启动时一次性套用语言；全程不提供切换入口 */
+  _applyStaticI18N(){
+    document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+    document.title = t("appTitle");
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-html]").forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+    document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
+    document.querySelectorAll("[data-i18n-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.i18nAria)); });
+  }
+
+  _openModal(id){ $(id).classList.add("show"); }
+  _closeModals(){ $("helpModal").classList.remove("show"); $("winModal").classList.remove("show"); }
+
+  /* ---------- 状态同步 ---------- */
+  _syncStatic(){
+    const c = this.engine.cfg;
+    $("brandLine").textContent = t("brandLine", {diff:t(c.labelKey)});
+    $("boardMeta").textContent = `${c.size} × ${c.size}`;
+    document.querySelectorAll("#difficulty button").forEach(b => b.classList.toggle("active", b.dataset.diff === this.diff));
+    $("btnSound").textContent = this.sound ? "♪" : "♪̸";
+    $("btnSound").style.opacity = this.sound ? "1" : ".45";
+  }
+
+  _updateHUD(){
+    const e = this.engine;
+    $("statFreed").textContent = e.freed;
+    $("statTotal").textContent = e.totalGarbage;
+    $("statMoves").textContent = e.moves;
+    const secs = e.elapsed();
+    $("statTime").textContent = `${String(Math.floor(secs/60)).padStart(2,"0")}:${String(secs%60).padStart(2,"0")}`;
+    const pct = e.totalGarbage ? Math.round(e.freed / e.totalGarbage * 100) : 0;
+    $("barFill").style.width = pct + "%";
+    $("barText").textContent = pct + "%";
+    $("groups").innerHTML = e.groups.map(g =>
+      `<span class="chip ${g.freed ? "done" : ""}">${t("chipGroup", {n:g.id+1, size:g.size, done:g.freed ? " ✓" : ""})}</span>`
+    ).join("");
+    $("btnUndo").disabled = this.history.length === 0;
+    const sel = e.selection;
+    if (sel){
+      const a = e.analyze(sel.x, sel.y);
+      $("inspector").innerHTML = t("inspectorSel", {
+        x:sel.x, y:sel.y, count:a.count, holders:a.holders || 0,
+        holding:a.holding || 0, external:a.external || 0,
+      }) + (a.topIsRoot ? t("inspectorRoot") : "");
+    } else {
+      $("inspector").innerHTML = t("inspectorIdle");
+    }
+  }
+
+  _msg(text, kind){
+    const el = $("msg");
+    el.textContent = text;
+    el.className = "board-foot" + (kind ? " " + kind : "");
+  }
+
+  _toast(text, bad){
+    const el = $("toast");
+    el.textContent = text;
+    el.className = "toast show" + (bad ? " bad" : "");
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => el.classList.remove("show"), 1900);
+  }
+
+  /* ---------- 主循环（空闲自动停止，移动端省电） ---------- */
+  requestRender(){ this.dirty = true; this._loop(); }
+
+  _loop(){
+    if (this.running) return;
+    this.running = true;
+    const frame = () => {
+      const r = this.renderer;
+      let animating = false;
+      if (this.anim){
+        const p = Math.min(1, (performance.now() - this.anim.t0) / this.anim.dur);
+        const ease = 1 - Math.pow(1 - p, 3);
+        const ax = this.anim.from.x + (this.anim.to.x - this.anim.from.x) * ease;
+        const ay = this.anim.from.y + (this.anim.to.y - this.anim.from.y) * ease;
+        this.view.fly = {x:ax, y:ay};
+        r.suppress = new Set([this.anim.id]);
+        animating = true;
+        if (p >= 1){
+          this.anim = null; this.view.fly = null; r.suppress = new Set();
+        }
+      }
+      animating = r.tickParticles() || animating;
+      if (this.dirty || animating){
+        this.view.selection = this.engine.selection;
+        this.view.focus = this.view.focus || {...this.focus};
+        r.draw(this.view);
+        this.dirty = false;
+      }
+      if (this.dirty || animating || this.anim || r.particles.length){
+        requestAnimationFrame(frame);
+      } else {
+        this.running = false;
+      }
+    };
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- 操作 ---------- */
+  _pushHistory(){ this.history.push(this.engine.snapshot()); if (this.history.length > 200) this.history.shift(); }
+
+  _act(x, y){
+    if (!this.engine.inBounds(x, y)) return;
+    if (this.engine.isComplete()) return;
+    if (this.engine.selection) this._pushHistory(); // 仅在实际搬运/释放前存档
+    const res = this.engine.click(x, y);
+    this.view.focus = {...this.focus};
+    if (res.ok && res.action === "move" && !REDUCED){
+      this.anim = {id:res.objId, from:res.from, to:res.to, t0:performance.now(), dur:190};
+      this._beep(420, .07, "triangle");
+    } else if (res.ok && res.action === "free"){
+      this.renderer.burst(x, y, res.count);
+      this._beep(660, .16, "sine");
+      setTimeout(() => this._beep(880, .18, "sine"), 90);
+    } else if (res.ok && res.action === "select"){
+      this._beep(520, .05, "sine");
+    } else if (!res.ok){
+      this._beep(180, .12, "sawtooth");
+    }
+    this._msg(res.msg, res.ok ? "ok" : "err");
+    if (!res.ok && res.code !== "empty") this._toast(res.msg, true);
+    this.requestRender();
+    this._updateHUD();
+    if (res.complete) this._win();
+  }
+
+  _cancelSelection(){
+    if (!this.engine.selection) return;
+    this.engine.cancel();
+    this._msg(t("msgCancel"), "");
+    this.requestRender(); this._updateHUD();
+  }
+
+  undo(){
+    if (!this.history.length){ this._toast(t("toastNoUndo")); return; }
+    this.engine.restore(this.history.pop());
+    this.engine.cancel();
+    this.anim = null; this.view.fly = null; this.renderer.suppress = new Set();
+    this.renderer.particles = [];
+    this._msg(t("msgUndo"), "");
+    this._beep(300, .09, "triangle");
+    this.requestRender(); this._updateHUD();
+  }
+
+  scan(){
+    this.engine.scans++;
+    const marked = this.engine.markReachable();
+    this.view.marked = marked;
+    this._msg(t("msgMark"), "ok");
+    this._toast(t("toastMark"));
+    this._beep(760, .12, "sine");
+    clearTimeout(this.markTimer);
+    this.markTimer = setTimeout(() => { this.view.marked = null; this.requestRender(); }, 3000);
+    this.requestRender(); this._updateHUD();
+  }
+
+  hint(){
+    const r = this.engine.hint();
+    if (!r.ok){ this._toast(r.msg); return; }
+    if (r.to){
+      this.view.hintCell = r.to;
+      clearTimeout(this.hintTimer);
+      this.hintTimer = setTimeout(() => { this.view.hintCell = null; this.requestRender(); }, 2800);
+    }
+    this._msg("✦ " + r.msg, "ok");
+    this._toast(t("toastHint"));
+    this._beep(600, .1, "triangle");
+    this.requestRender(); this._updateHUD();
+  }
+
+  newGame(diff){
+    this.diff = CONFIG[diff] ? diff : "normal";
+    this.engine = new GCEngine(this.diff);
+    this.renderer.engine = this.engine;
+    this.renderer.resize();
+    this.history = [];
+    this.focus = {x:0, y:0};
+    this.view = {selection:null, focus:{x:0,y:0}, marked:null, hintCell:null, fly:null};
+    this.anim = null; this.renderer.suppress = new Set(); this.renderer.particles = [];
+    clearTimeout(this.markTimer); clearTimeout(this.hintTimer);
+    this._syncStatic();
+    this._msg(t("msgNewGame"), "");
+    this._toast(t("toastDiff", {diff:t(this.engine.cfg.labelKey)}));
+    this.requestRender(); this._updateHUD();
+  }
+
+  _win(){
+    const e = this.engine, secs = e.elapsed();
+    const fmt = s => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+    const hints = e.hints + e.scans;
+    let stars = 5 - Math.floor(hints / 2) - (secs > 240 ? 1 : 0) - (e.moves > e.totalGarbage * 2.5 ? 1 : 0);
+    stars = Math.max(1, Math.min(5, stars));
+    $("winStars").textContent = "★".repeat(stars) + "☆".repeat(5 - stars);
+    $("winTime").textContent = fmt(secs);
+    $("winMoves").textContent = e.moves;
+    $("winHints").textContent = hints;
+    const prev = this.best[this.diff];
+    if (!prev || secs < prev.time){
+      this.best[this.diff] = {time:secs, moves:e.moves, stars};
+      this._save("gc_best", this.best);
+      $("winBest").textContent = t("winBestNew");
+    } else {
+      $("winBest").textContent = t("winBest", {time:fmt(prev.time)});
+    }
+    this._beep(880, .2, "sine");
+    setTimeout(() => this._beep(1175, .28, "sine"), 140);
+    setTimeout(() => this._openModal("winModal"), REDUCED ? 100 : 700);
+  }
+}
+
+new App();
+}
+})();
+</script>
+</body>
 </html>
